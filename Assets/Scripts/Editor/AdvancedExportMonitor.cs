@@ -4,7 +4,8 @@ using System.IO;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEditor.Formats.Fbx.Exporter;
-using System.Collections;
+using System.Collections.Concurrent;
+using System.Threading;
 
 [InitializeOnLoad]
 public class AdvancedExportMonitor
@@ -12,8 +13,78 @@ public class AdvancedExportMonitor
     private const string PrefsKey = "ExportMonitorEnabled";
     private static HashSet<GameObject> _previousActiveObjects = new HashSet<GameObject>();
     private static HashSet<int> _exportedObjects = new HashSet<int>();
-    private static readonly string ExportRoot = "Assets/ExportedAssets/";
+    private static readonly string ExportRoot = "C:\\Users\\SIM-PC-1\\Desktop\\ExportedAssets";
     private static ExportModelOptions exportModelOptions = new ExportModelOptions();
+
+    private static ConcurrentQueue<GameObject> exportQueue = new ConcurrentQueue<GameObject>();
+
+    private static int WorkerCount = 128;
+    private static List<Thread> workers = new List<Thread>();
+    private static volatile bool keepRunning = true;
+
+
+    private static void StartWorkers()
+    {
+        for (int i = 0; i < WorkerCount; i++)
+        {
+            Thread t = new Thread(ExportWorker);
+            t.IsBackground = true;
+            t.Start();
+            workers.Add(t);
+        }
+    }
+
+    private static void ExportWorker()
+    {
+        while (keepRunning)
+        {
+            if (exportQueue.TryDequeue(out var go))
+            {
+                /*
+                lock (_exportedObjects)
+                {
+                    if (_exportedObjects.Contains(go.GetInstanceID()))
+                    {
+                        continue;
+                    }
+                    _exportedObjects.Add(go.GetInstanceID());
+                }
+
+                EditorApplication.delayCall += () => ProcessGameObject(go);*/
+
+                EditorApplication.delayCall += () =>
+                {
+                    int id = go.GetInstanceID();
+                    lock (_exportedObjects)
+                    {
+                        if (_exportedObjects.Contains(id))
+                        {
+                            return;
+                        }
+                        _exportedObjects.Add(id);
+                    }
+                    ProcessGameObject(go);
+                };
+            }
+            else
+            {
+                Thread.Sleep(100);
+            }
+        }        
+    }
+
+    private static void StopWorkers()
+    {
+        keepRunning = false;
+        foreach (var thread in workers)
+        {
+            if (thread.IsAlive)
+            {
+                thread.Join();
+            }
+        }
+        workers.Clear();
+    }
 
     static AdvancedExportMonitor()
     {
@@ -47,6 +118,7 @@ public class AdvancedExportMonitor
         EditorApplication.hierarchyChanged += OnHierarchyChanged;
         EnsureExportDirectory();
         Debug.Log("Export Monitor: Enabled");
+        StartWorkers();
     }
 
     private static void DisableMonitoring()
@@ -55,6 +127,7 @@ public class AdvancedExportMonitor
         _previousActiveObjects.Clear();
         _exportedObjects.Clear();
         Debug.Log("Export Monitor: Disabled");
+        StopWorkers();
     }
 
     private static void EnsureExportDirectory()
@@ -84,7 +157,7 @@ public class AdvancedExportMonitor
         {
             if (ShouldExport(go))
             {
-                ProcessGameObject(go);
+                exportQueue.Enqueue(go);
             }
         }
 
@@ -98,9 +171,9 @@ public class AdvancedExportMonitor
 
         string parentName = GetExportName(go);
         if (!parentName.Contains("http")) return false;
-        string tilenumber = int.Parse(parentName.Split("/")[6].Split("_")[1]).ToString("00") + "-";
+        string tileNumber = int.Parse(parentName.Split("/")[6].Split("_")[1]).ToString("00") + "-";
         parentName = parentName.Split("/")[9].Split(".")[0];
-        parentName = parentName.Substring(0, 3) + tilenumber + parentName.Substring(3);
+        parentName = parentName.Substring(0, 3) + tileNumber + parentName.Substring(3);
         string fbxPath = Path.Combine(ExportRoot, $"{parentName}.fbx");
         return !File.Exists(fbxPath);
     }
@@ -114,20 +187,26 @@ public class AdvancedExportMonitor
 
     private static void ProcessGameObject(GameObject go)
     {
+        
         string baseName = GetExportName(go);
         if (!baseName.Contains("http")) return;
-        string tilenumber = int.Parse(baseName.Split("/")[6].Split("_")[1]).ToString("00") + "-";
+        string tileNumber = int.Parse(baseName.Split("/")[6].Split("_")[1]).ToString("00") + "-";
         baseName = baseName.Split("/")[9].Split(".")[0];
-        baseName = baseName.Substring(0, 3) + tilenumber + baseName.Substring(3);
+        baseName = baseName.Substring(0, 3) + tileNumber + baseName.Substring(3);
         Renderer renderer = go.GetComponent<Renderer>();
         MeshFilter meshFilter = go.GetComponent<MeshFilter>();
 
-        if (renderer == null || meshFilter == null)  return;
+        if (renderer == null || meshFilter == null) return;
 
-        Material material = ProcessMaterial(renderer, baseName);
-        ExportFbx(go, baseName, material);
+        ProcessMaterial(renderer, baseName);
+        ExportFbx(go, baseName, null);
+        /*Transform tempParent = go.transform.parent; 
+        
+        if (success)
+        {
+           
+        }*/
         _exportedObjects.Add(go.GetInstanceID());
-
         Debug.Log($"Exported: {baseName}");
     }
 
@@ -137,7 +216,7 @@ public class AdvancedExportMonitor
         if (originalMat == null) return null;
 
         Texture2D texture = originalMat.GetTexture("_baseColorTexture") as Texture2D;
-        string texPath = ExportTexture(texture, baseName);
+        ExportTexture(texture, baseName);
 
         /*
         Material newMat = new Material(originalMat);
@@ -145,9 +224,8 @@ public class AdvancedExportMonitor
         newMat.mainTexture = AssetDatabase.LoadAssetAtPath<Texture2D>(texPath);
 
         string matPath = Path.Combine(ExportRoot, $"{baseName}_Mat.mat");
-        //AssetDatabase.CreateAsset(newMat, matPath);
+        AssetDatabase.CreateAsset(newMat, matPath);
         */
-
         return null;
     }
 
@@ -158,6 +236,7 @@ public class AdvancedExportMonitor
         byte[] bytes = InstantiateTexture(texture).EncodeToJPG();
 
         string texPath = Path.Combine(ExportRoot, $"{baseName}_Texture.jpg");
+
 
         File.WriteAllBytes(texPath, bytes);
 
@@ -189,7 +268,7 @@ public class AdvancedExportMonitor
         {
             GameObject tempGo = Object.Instantiate(go.transform.parent.gameObject);
             tempGo.name = baseName;
-            //tempGo.transform.GetChild(0).GetComponent<Renderer>().sharedMaterial = material;
+            //tempGo.GetComponent<Renderer>().sharedMaterial = material;
 
             string fbxPath = Path.Combine(ExportRoot, $"{baseName}.fbx");
 
@@ -197,6 +276,14 @@ public class AdvancedExportMonitor
 
             Object.DestroyImmediate(tempGo);
             //AssetDatabase.Refresh();
+            /*GameObject nestedChild = go;
+            if (nestedChild != null)
+            {
+                Undo.DestroyObjectImmediate(nestedChild);
+                Debug.Log($"Removed child '{nestedChild.name}' from '{nestedChild.name}'");
+                return true;
+            }*/
+            
         }
         catch (System.Exception e)
         {

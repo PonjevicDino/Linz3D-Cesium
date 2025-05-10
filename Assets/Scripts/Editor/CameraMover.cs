@@ -13,6 +13,7 @@ public class CameraMoverWindow : EditorWindow
     private Vector3Int startPoint = new Vector3Int(5, 5, 5);
     private Vector3Int endPoint = Vector3Int.zero;
     private bool isMoving;
+    private bool isNextPressed = false;
     private EditorCoroutine movementCoroutine;
     private int totalPositions;
     private int currentPositionIndex;
@@ -44,6 +45,10 @@ public class CameraMoverWindow : EditorWindow
             if (GUILayout.Button("Stop Movement"))
             {
                 StopCameraMovement();
+            }
+            if (GUILayout.Button("Next Step (1s TO)"))
+            {
+                isNextPressed = true;
             }
 
             // Progress display
@@ -125,11 +130,11 @@ public class CameraMoverWindow : EditorWindow
 
         int totalPositions = 0;
 
-        for (int x = start.x; x != end.x + xStep * 25; x += xStep * 25)
+        for (int x = start.x; x != end.x + xStep * 250; x += xStep * 250)
         {
-            for (int z = start.z; z != end.z + zStep * 25; z += zStep * 25)
+            for (int z = start.z; z != end.z + zStep * 250; z += zStep * 250)
             {
-                for (int y = start.y; y != end.y + yStep * 25; y += yStep * 25)
+                for (int y = start.y; y != end.y + yStep * 250; y += yStep * 250)
                 {
                     totalPositions++;
                 }
@@ -140,11 +145,11 @@ public class CameraMoverWindow : EditorWindow
 
         int arrIndex = 0;
 
-        for (int x = start.x; x != end.x + xStep * 25; x += xStep * 25)
+        for (int x = start.x; x != end.x + xStep * 250; x += xStep * 250)
         {
-            for (int z = start.z; z != end.z + zStep * 25; z += zStep * 25)
+            for (int z = start.z; z != end.z + zStep * 250; z += zStep * 250)
             {
-                for (int y = start.y; y != end.y + yStep * 25; y += yStep * 25)
+                for (int y = start.y; y != end.y + yStep * 250; y += yStep * 250)
                 {
                     positions[arrIndex] = (new Vector3(x, y, z));
                     arrIndex++;
@@ -166,7 +171,7 @@ public class CameraMoverWindow : EditorWindow
         Vector3 originalPivot = sceneView.pivot;
 
         // Setup camera
-        sceneView.orthographic = true;
+        //sceneView.orthographic = true;
         sceneView.size = 0.5f;
         Quaternion targetRotation = Quaternion.LookRotation(Vector3.down, Vector3.forward);
 
@@ -188,7 +193,27 @@ public class CameraMoverWindow : EditorWindow
             // Force UI update
             Repaint();
 
-            yield return new EditorWaitForSeconds(0.001f);
+            yield return new EditorWaitForSeconds(0.2f);
+            RaycastHit hit;
+            if (!Physics.Raycast(positions[currentPositionIndex], Vector3.down, out hit, 10000.0f))
+            {
+                yield return new EditorWaitForSeconds(0.05f);
+            }
+            else
+            {
+                for (int seconds = 0; seconds < 60; seconds++) // <---- 60 = Timeout
+                {
+                    if (isNextPressed)
+                    {
+                        isNextPressed = false;
+                        break;
+                    }
+                    else
+                    {
+                        yield return new EditorWaitForSeconds(1.0f);
+                    }
+                }
+            }
         }
 
         // Restore camera state
