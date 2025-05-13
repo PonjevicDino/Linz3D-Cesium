@@ -794,7 +794,7 @@ MonoBehaviour:
   _ionAssetID: 96188
   _ionAccessToken: 
   _ionServer: {fileID: 11400000, guid: f5bd623c0e09cbe45a276eb189516618, type: 2}
-  _maximumScreenSpaceError: 8
+  _maximumScreenSpaceError: 0
   _preloadAncestors: 1
   _preloadSiblings: 1
   _forbidHoles: 1
@@ -919,7 +919,7 @@ Transform:
   m_GameObject: {fileID: 1710658134}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 3988.9, y: -2410, z: 8443.2}
+  m_LocalPosition: {x: 1066, y: -2571, z: 1359}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []

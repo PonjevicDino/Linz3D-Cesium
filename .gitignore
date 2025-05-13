@@ -73,3 +73,4 @@ crashlytics-build.properties
 
 # Exported Assets (FBX)
 /[Aa]ssets/[Ee]xportedAssets/
+/[Aa]ssets/[Ff]bxChunkGenerator/
