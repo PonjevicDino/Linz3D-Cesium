@@ -243,7 +243,9 @@ public class ChunkedFbxProcessor : EditorWindow
                 foreach (GameObject go in mergedTiles)
                 {
                     EditorUtility.DisplayProgressBar("Exporting Merged FBX Files", $"Processing {go}", (float)processedCount / total);
+                    AssetDatabase.StartAssetEditing();
                     ExportGameObjectToFbx(go);
+                    AssetDatabase.StopAssetEditing();
                     processedCount++;
                 }
                 Debug.Log($"Merged tiles into {mergedTiles.Count} combined objects.");
