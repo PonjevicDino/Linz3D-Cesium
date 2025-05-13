@@ -14,6 +14,7 @@ public class ChunkedFbxProcessor : EditorWindow
     private string folderPath = "Assets";
     private string filterByAsset = "";
     private int finishedChunkCount = 0;
+    private int processNumber = 0;
     private ExportModelOptions exportModelOptions = new ExportModelOptions();
     [MenuItem("Tools/Fbx Merger by Chunks")]
     static void Init()
@@ -247,6 +248,7 @@ public class ChunkedFbxProcessor : EditorWindow
         {
             EditorUtility.ClearProgressBar();
             processedCount = 0;
+            processNumber = 0;
             total = mergedTiles.Count;
             if (mergedTiles != null && mergedTiles.Count > 0)
             {
@@ -259,6 +261,7 @@ public class ChunkedFbxProcessor : EditorWindow
                     AssetDatabase.StopAssetEditing();
                     
                     processedCount++;
+                    processNumber++;
                 }
                 Debug.Log($"Merged tiles into {mergedTiles.Count} combined objects.");
             }
@@ -272,8 +275,8 @@ public class ChunkedFbxProcessor : EditorWindow
         string safeName = SanitizeFileName(go.name);
         string folderPath = Path.Combine(ExportFolder + filterByAsset + "_FBXFolderAssets/");
         string fbxPath = Path.Combine(folderPath, $"{safeName}.fbx");
-        string materialsFolder = Path.Combine(folderPath, "Materials");
-        string texturesFolder = Path.Combine(folderPath, "Textures");
+        string materialsFolder = Path.Combine(folderPath, "Materials/Chunknumber_" + (processNumber+1));
+        string texturesFolder = Path.Combine(folderPath, "Textures/Chunknumber_"+ (processNumber+1));
 
 
         Directory.CreateDirectory(materialsFolder);
@@ -303,6 +306,7 @@ public class ChunkedFbxProcessor : EditorWindow
 
                 // Copy main texture
                 Texture2D tex = original.mainTexture as Texture2D;
+                tex.name = $"{safeName}_Texture_{i}";
                 if (tex != null)
                 {
                     exportMat.mainTexture = tex;
