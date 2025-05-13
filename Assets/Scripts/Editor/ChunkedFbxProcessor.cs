@@ -108,6 +108,9 @@ public class ChunkedFbxProcessor : EditorWindow
         var manifests = Directory.GetFiles(manifestFolder, "*.txt");
         int totalChunks = manifests.Length, ci = 0;
 
+        processNumber = 0;
+        AssetDatabase.StartAssetEditing();
+
         foreach (var mf in manifests)
         {
             float prog = (float)(ci++) / totalChunks;
@@ -152,7 +155,6 @@ public class ChunkedFbxProcessor : EditorWindow
             }
 
             // now call your merge/export routine on just this chunk’s tiles
-
             MergeAndExportChunk(tiles);
 
             // destroy originals & delete manifest
@@ -160,6 +162,9 @@ public class ChunkedFbxProcessor : EditorWindow
                 GameObject.DestroyImmediate(t.transform.parent.gameObject);
             File.Delete(mf);
         }
+
+        AssetDatabase.StopAssetEditing();
+        AssetDatabase.Refresh();
 
         EditorUtility.ClearProgressBar();
         Debug.Log($"Processed {totalChunks} chunks; imports/exports complete.");
@@ -248,7 +253,6 @@ public class ChunkedFbxProcessor : EditorWindow
         {
             EditorUtility.ClearProgressBar();
             processedCount = 0;
-            processNumber = 0;
             total = mergedTiles.Count;
             if (mergedTiles != null && mergedTiles.Count > 0)
             {
@@ -256,10 +260,7 @@ public class ChunkedFbxProcessor : EditorWindow
                 foreach (GameObject go in mergedTiles)
                 {
                     EditorUtility.DisplayProgressBar("Exporting Merged FBX Files", $"Processing {go}", (float)processedCount / total);
-                    AssetDatabase.StartAssetEditing();
                     ExportGameObjectToFbx(go);
-                    AssetDatabase.StopAssetEditing();
-                    
                     processedCount++;
                     processNumber++;
                 }
