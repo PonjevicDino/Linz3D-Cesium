@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Collections.Generic;
 using UnityEditor.Formats.Fbx.Exporter;
+using UnityEditor.Experimental.GraphView;
 
 public class ChunkedFbxProcessor : EditorWindow
 {
@@ -116,6 +117,16 @@ public class ChunkedFbxProcessor : EditorWindow
             var lines = File.ReadAllLines(mf);
             var tiles = new List<GameObject>();
 
+            string safeName = SanitizeFileName(filterByAsset + "-MergedTile-" + (finishedChunkCount + 1));
+            string folderPath = Path.Combine(ExportFolder + filterByAsset + "_FBXFolderAssets/");
+            string fbxPath = GetAbsolutePath(Path.Combine(folderPath, $"{safeName}.fbx"));
+            if (File.Exists(fbxPath))
+            {
+                Debug.Log("Skipped chunk, because it already exists.");             
+                finishedChunkCount++;
+                File.Delete(mf);
+                continue;
+            }
             // instantiate & texture each entry
             foreach (var ln in lines)
             {
@@ -133,17 +144,14 @@ public class ChunkedFbxProcessor : EditorWindow
                 if (tex != null) m.SetTexture("_BaseColorMap", tex);
                 r.sharedMaterial = m;
 
-                // add colliders for sphere‐merging
                 var mfilt = inst.GetComponentInChildren<MeshFilter>();
                 var mesh = mfilt.sharedMesh;
-                var bc = mfilt.gameObject.AddComponent<BoxCollider>();
-                bc.center = mesh.bounds.center;
-                bc.size = mesh.bounds.size;
 
                 tiles.Add(mfilt.gameObject);
             }
 
             // now call your merge/export routine on just this chunk’s tiles
+
             MergeAndExportChunk(tiles);
 
             // destroy originals & delete manifest
@@ -153,7 +161,6 @@ public class ChunkedFbxProcessor : EditorWindow
         }
 
         EditorUtility.ClearProgressBar();
-        AssetDatabase.Refresh();
         Debug.Log($"Processed {totalChunks} chunks; imports/exports complete.");
     }
 
@@ -227,10 +234,14 @@ public class ChunkedFbxProcessor : EditorWindow
                     tiles.Remove(go);
                     if (go != null)
                     {
-                        Object.DestroyImmediate(go.transform.parent.gameObject);
+                        UnityEngine.Object.DestroyImmediate(go.transform.parent.gameObject);
                     }
                 }
             }
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogException(e);
         }
         finally
         {
@@ -246,11 +257,11 @@ public class ChunkedFbxProcessor : EditorWindow
                     AssetDatabase.StartAssetEditing();
                     ExportGameObjectToFbx(go);
                     AssetDatabase.StopAssetEditing();
+                    
                     processedCount++;
                 }
                 Debug.Log($"Merged tiles into {mergedTiles.Count} combined objects.");
             }
-            AssetDatabase.Refresh();
 
         }
         EditorUtility.ClearProgressBar();
@@ -333,13 +344,10 @@ public class ChunkedFbxProcessor : EditorWindow
         if (!Directory.Exists(ExportFolder))
         {
             Directory.CreateDirectory(ExportFolder);
-            AssetDatabase.Refresh();
         }
         if (!Directory.Exists(ExportFolder + filterByAsset + "_FBXFolderAssets/"))
         {
             Directory.CreateDirectory(ExportFolder + filterByAsset + "_FBXFolderAssets/");
-
-            AssetDatabase.Refresh();
         }
     }
 
@@ -363,5 +371,25 @@ public class ChunkedFbxProcessor : EditorWindow
         }
 
         return null;
+    }
+    public static string GetAbsolutePath(string relativePath)
+    {
+        // Ensure consistent separators
+        relativePath = relativePath.Replace("\\", "/");
+
+        if (relativePath.StartsWith("Assets"))
+        {
+            string basePath = Application.dataPath; // e.g., C:/MyProject/Assets
+            string subPath = relativePath.Substring("Assets/".Length);
+            //subPath = subPath.TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            string fullPath = Path.Combine(basePath, subPath).Replace("/", Path.DirectorySeparatorChar.ToString());
+            return fullPath;
+        }
+        else
+        {
+            // If it's not under Assets, treat it as already absolute or invalid
+            Debug.LogWarning($"Path doesn't start with 'Assets': {relativePath}");
+            return Path.GetFullPath(relativePath);
+        }
     }
 }
