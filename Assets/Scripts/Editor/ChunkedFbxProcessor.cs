@@ -75,7 +75,7 @@ public class ChunkedFbxProcessor : EditorWindow
 
             var inst = PrefabUtility.InstantiatePrefab(prefab) as GameObject;
             Vector3 pos = inst.transform.GetChild(0).transform.position;
-            GameObject.DestroyImmediate(inst);
+            GameObject.DestroyImmediate(inst, true);
 
             // compute chunk coords
             int cx = Mathf.FloorToInt(pos.x / chunkSize);
@@ -159,7 +159,7 @@ public class ChunkedFbxProcessor : EditorWindow
 
             // destroy originals & delete manifest
             foreach (var t in tiles)
-                GameObject.DestroyImmediate(t.transform.parent.gameObject);
+                GameObject.DestroyImmediate(t.transform.parent.gameObject, true);
             File.Delete(mf);
 
             Resources.UnloadUnusedAssets(); 
@@ -243,7 +243,7 @@ public class ChunkedFbxProcessor : EditorWindow
                     tiles.Remove(go);
                     if (go != null)
                     {
-                        UnityEngine.Object.DestroyImmediate(go.transform.parent.gameObject);
+                        UnityEngine.Object.DestroyImmediate(go.transform.parent.gameObject, true);
                     }
                 }
             }
@@ -287,7 +287,7 @@ public class ChunkedFbxProcessor : EditorWindow
         Directory.CreateDirectory(texturesFolder);
         if (File.Exists(fbxPath))
         {
-            Object.DestroyImmediate(go);
+            Object.DestroyImmediate(go, true);
             return;
         }
 
@@ -344,7 +344,7 @@ public class ChunkedFbxProcessor : EditorWindow
         // Export textures from each material (single renderer, multiple materials)
         //ExportMaterialsTextures(temp.GetComponent<Renderer>(), folderPath, safeName);
 
-        Object.DestroyImmediate(temp);
+        Object.DestroyImmediate(temp, true);
 
     }
     private void EnsureExportDirectory()
