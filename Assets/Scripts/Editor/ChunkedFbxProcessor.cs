@@ -75,7 +75,7 @@ public class ChunkedFbxProcessor : EditorWindow
 
             var inst = PrefabUtility.InstantiatePrefab(prefab) as GameObject;
             Vector3 pos = inst.transform.GetChild(0).transform.position;
-            GameObject.DestroyImmediate(inst, true);
+            GameObject.DestroyImmediate(inst);
 
             // compute chunk coords
             int cx = Mathf.FloorToInt(pos.x / chunkSize);
@@ -121,12 +121,12 @@ public class ChunkedFbxProcessor : EditorWindow
             var lines = File.ReadAllLines(mf);
             var tiles = new List<GameObject>();
 
-            string safeName = SanitizeFileName(filterByAsset + "-MergedTile-" + (finishedChunkCount + 1));
+            string safeName = SanitizeFileName(filterByAsset + "_MergedTile_" + (finishedChunkCount + 1));
             string folderPath = Path.Combine(ExportFolder + filterByAsset + "_FBXFolderAssets/");
             string fbxPath = GetAbsolutePath(Path.Combine(folderPath, $"{safeName}.fbx"));
             if (File.Exists(fbxPath))
             {
-                Debug.Log("Skipped chunk, because it already exists.");             
+                Debug.Log("Skipped chunk, because it already exists.");
                 finishedChunkCount++;
                 File.Delete(mf);
                 continue;
@@ -159,10 +159,8 @@ public class ChunkedFbxProcessor : EditorWindow
 
             // destroy originals & delete manifest
             foreach (var t in tiles)
-                GameObject.DestroyImmediate(t.transform.parent.gameObject, true);
+                GameObject.DestroyImmediate(t.transform.parent.gameObject);
             File.Delete(mf);
-
-            Resources.UnloadUnusedAssets(); 
             System.GC.Collect();
         }
 
@@ -229,7 +227,7 @@ public class ChunkedFbxProcessor : EditorWindow
 
                 // Create new GameObject for the combined mesh
                 finishedChunkCount++;
-                GameObject merged = new GameObject(filterByAsset + "-MergedTile-" + finishedChunkCount);
+                GameObject merged = new GameObject(filterByAsset + "_MergedTile_" + finishedChunkCount);
                 MeshFilter newMf = merged.AddComponent<MeshFilter>();
                 newMf.sharedMesh = combinedMesh;
                 MeshRenderer newMr = merged.AddComponent<MeshRenderer>();
@@ -243,7 +241,7 @@ public class ChunkedFbxProcessor : EditorWindow
                     tiles.Remove(go);
                     if (go != null)
                     {
-                        UnityEngine.Object.DestroyImmediate(go.transform.parent.gameObject, true);
+                        UnityEngine.Object.DestroyImmediate(go.transform.parent.gameObject);
                     }
                 }
             }
@@ -279,15 +277,15 @@ public class ChunkedFbxProcessor : EditorWindow
         string safeName = SanitizeFileName(go.name);
         string folderPath = Path.Combine(ExportFolder + filterByAsset + "_FBXFolderAssets/");
         string fbxPath = Path.Combine(folderPath, $"{safeName}.fbx");
-        string materialsFolder = Path.Combine(folderPath, "Materials/Chunknumber_" + (processNumber+1));
-        string texturesFolder = Path.Combine(folderPath, "Textures/Chunknumber_"+ (processNumber+1));
+        string materialsFolder = Path.Combine(folderPath, "Materials/");
+        string texturesFolder = Path.Combine(folderPath, "Textures/");
 
 
         Directory.CreateDirectory(materialsFolder);
         Directory.CreateDirectory(texturesFolder);
         if (File.Exists(fbxPath))
         {
-            Object.DestroyImmediate(go, true);
+            Object.DestroyImmediate(go);
             return;
         }
 
@@ -306,11 +304,11 @@ public class ChunkedFbxProcessor : EditorWindow
 
                 // Clone material
                 Material exportMat = new Material(Shader.Find("HDRP/Lit"));
-                exportMat.name = $"{safeName}_Material_{i}";
+                exportMat.name = $"_{safeName}_Material_{i}";
 
                 // Copy main texture
                 Texture2D tex = original.mainTexture as Texture2D;
-                tex.name = $"{safeName}_Texture_{i}";
+                tex.name = $"_{safeName}_Texture_{i}";
                 if (tex != null)
                 {
                     exportMat.mainTexture = tex;
@@ -344,7 +342,7 @@ public class ChunkedFbxProcessor : EditorWindow
         // Export textures from each material (single renderer, multiple materials)
         //ExportMaterialsTextures(temp.GetComponent<Renderer>(), folderPath, safeName);
 
-        Object.DestroyImmediate(temp, true);
+        Object.DestroyImmediate(temp);
 
     }
     private void EnsureExportDirectory()
