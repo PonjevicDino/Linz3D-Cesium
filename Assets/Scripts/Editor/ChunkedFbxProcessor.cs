@@ -161,6 +161,9 @@ public class ChunkedFbxProcessor : EditorWindow
             foreach (var t in tiles)
                 GameObject.DestroyImmediate(t.transform.parent.gameObject);
             File.Delete(mf);
+
+            Resources.UnloadUnusedAssets(); 
+            System.GC.Collect();
         }
 
         AssetDatabase.StopAssetEditing();
