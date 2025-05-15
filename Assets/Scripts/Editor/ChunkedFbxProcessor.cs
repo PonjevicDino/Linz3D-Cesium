@@ -1,404 +1,276 @@
-﻿using UnityEngine;
-using UnityEditor;
+﻿using System;
+using System.Collections;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Collections.Generic;
+using Unity.EditorCoroutines.Editor;
+using UnityEditor;
 using UnityEditor.Formats.Fbx.Exporter;
-using UnityEditor.Experimental.GraphView;
+using UnityEngine;
 
 public class ChunkedFbxProcessor : EditorWindow
 {
-    private float chunkSize = 100f; // your chunk edge length
+    private float chunkSize = 100f;
     const string manifestFolder = "Assets/FbxChunkGenerator/ChunkManifests";
     private readonly string ExportFolder = "Assets/FbxChunkGenerator/ExportedMergedFBX/";
     private string folderPath = "Assets";
     private string filterByAsset = "";
     private int finishedChunkCount = 0;
-    private int processNumber = 0;
     private ExportModelOptions exportModelOptions = new ExportModelOptions();
+
+    // Background processing state
+    private bool isProcessing;
+    private EditorCoroutine processingCoroutine;
+    private int totalChunks;
+    private int processedChunks;
+    private string currentOperation;
+
     [MenuItem("Tools/Fbx Merger by Chunks")]
     static void Init()
     {
-        ChunkedFbxProcessor window = (ChunkedFbxProcessor)GetWindow(typeof(ChunkedFbxProcessor));
+        var window = GetWindow<ChunkedFbxProcessor>();
         window.Show();
     }
+
     void OnGUI()
     {
         GUILayout.Label("FBX + Texture Importer & Merger", EditorStyles.boldLabel);
         filterByAsset = EditorGUILayout.TextField("Filter/Split by Asset Name", filterByAsset);
         chunkSize = EditorGUILayout.FloatField("Chunk Size in Meter", chunkSize);
-        EditorGUILayout.LabelField("Folder Path: " + folderPath);
+
+        EditorGUILayout.Space();
+        folderPath = EditorGUILayout.TextField("FBX Root Folder", folderPath);
         if (GUILayout.Button("Select Folder"))
         {
             folderPath = EditorUtility.OpenFolderPanel("Select FBX Folder", folderPath, "");
         }
-        GUILayout.Label("Step 1: Build Chunk Manifests", EditorStyles.boldLabel);
-        folderPath = EditorGUILayout.TextField("FBX Root Folder", folderPath);
-        if (GUILayout.Button("Build Manifests")) BuildManifests();
 
-        GUILayout.Space(10);
-        GUILayout.Label("Step 2: Process Chunks", EditorStyles.boldLabel);
-        if (GUILayout.Button("Merge & Export All Chunks")) ProcessAllChunks();
+        EditorGUILayout.Space();
+        GUI.enabled = !isProcessing;
+        if (GUILayout.Button("Build Manifests")) StartCoroutine(BuildManifestsAsync());
+        if (GUILayout.Button("Merge & Export All Chunks")) StartCoroutine(ProcessAllChunksAsync());
+        GUI.enabled = true;
+
+        if (isProcessing)
+        {
+            EditorGUILayout.Space();
+            EditorGUI.ProgressBar(EditorGUILayout.GetControlRect(),
+                (float)processedChunks / totalChunks,
+                $"{currentOperation} ({processedChunks}/{totalChunks})");
+
+            if (GUILayout.Button("Cancel"))
+                CancelProcessing();
+        }
     }
 
-    // — STEP 1: build text lists per chunk by streaming every FBX one at a time —
-    void BuildManifests()
+    void StartCoroutine(IEnumerator routine)
     {
+        if (isProcessing) return;
+        processingCoroutine = EditorCoroutineUtility.StartCoroutine(routine, this);
+    }
+
+    void CancelProcessing()
+    {
+        if (processingCoroutine != null)
+            EditorCoroutineUtility.StopCoroutine(processingCoroutine);
+
+        isProcessing = false;
+        EditorUtility.ClearProgressBar();
+        Resources.UnloadUnusedAssets();
+        GC.Collect();
+    }
+
+    IEnumerator BuildManifestsAsync()
+    {
+        isProcessing = true;
+        currentOperation = "Building Manifests";
+
         if (!Directory.Exists(manifestFolder))
             Directory.CreateDirectory(manifestFolder);
         else
-        {
-            foreach (var file in Directory.GetFiles(manifestFolder, "*.txt"))
-            {
-                File.Delete(file);
-            }
-        }
+            Directory.GetFiles(manifestFolder).ToList().ForEach(File.Delete);
 
-        // Enumerate every FBX file under fbxRoot
-        var allFbx = Directory.EnumerateFiles(folderPath, "*.fbx", SearchOption.AllDirectories);
-        allFbx = allFbx.Where(fbxFile => {
-            string[] splits = fbxFile.Replace("\\", "/").Split("/");
-            int lastIndex = splits.Length - 1;
-            return splits[lastIndex].StartsWith(filterByAsset);
-        });
-        int total = allFbx.Count(), i = 0;
+        var allFbx = Directory.EnumerateFiles(folderPath, "*.fbx", SearchOption.AllDirectories)
+            .Where(f => Path.GetFileName(f).StartsWith(filterByAsset))
+            .ToList();
+
+        totalChunks = allFbx.Count;
+        processedChunks = 0;
+
         foreach (var absPath in allFbx)
         {
-            float prog = (float)(i++) / total;
-            EditorUtility.DisplayProgressBar("Building Manifests",
-                Path.GetFileName(absPath), prog);
+            if (!isProcessing) yield break;
 
-            // load the FBX prefab, instantiate, read its position, destroy
+            processedChunks++;
             string rel = ToUnityPath(absPath);
             var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(rel);
-            if (prefab == null) continue;
 
-            var inst = PrefabUtility.InstantiatePrefab(prefab) as GameObject;
-            Vector3 pos = inst.transform.GetChild(0).transform.position;
-            GameObject.DestroyImmediate(inst);
+            if (prefab != null)
+            {
+                var inst = PrefabUtility.InstantiatePrefab(prefab) as GameObject;
+                Vector3 pos = inst.transform.GetChild(0).position;
+                DestroyImmediate(inst);
 
-            // compute chunk coords
-            int cx = Mathf.FloorToInt(pos.x / chunkSize);
-            int cy = Mathf.FloorToInt(pos.y / chunkSize);
-            int cz = Mathf.FloorToInt(pos.z / chunkSize);
-            string manifest = Path.Combine(manifestFolder, $"{cx}_{cy}_{cz}.txt");
+                int cx = Mathf.FloorToInt(pos.x / chunkSize);
+                int cy = Mathf.FloorToInt(pos.y / chunkSize);
+                int cz = Mathf.FloorToInt(pos.z / chunkSize);
+                string manifest = Path.Combine(manifestFolder, $"{cx}_{cy}_{cz}.txt");
 
-            // append the FBX and texture path
-            string texPath = Path.ChangeExtension(rel.Split(".")[0] + "_Texture.fbx", ".jpg");
-            File.AppendAllLines(manifest,
-                new[] { rel + "|" + texPath });
+                File.AppendAllText(manifest, $"{rel}|{Path.ChangeExtension(rel, ".jpg")}\n");
+            }
+
+            if (processedChunks % 10 == 0)
+            {
+                yield return null;
+                GC.Collect();
+            }
         }
 
         AssetDatabase.Refresh();
-        EditorUtility.ClearProgressBar();
-        Debug.Log("Built chunk manifests in " + manifestFolder);
+        isProcessing = false;
     }
 
-    // — STEP 2: for each chunk, read its small list, merge/export, then clean up —
-    void ProcessAllChunks()
+    IEnumerator ProcessAllChunksAsync()
     {
-        finishedChunkCount = 0;
+        isProcessing = true;
+        currentOperation = "Processing Chunks";
+
         if (!Directory.Exists(manifestFolder))
         {
             Debug.LogError("No manifests found. Build them first.");
-            return;
+            isProcessing = false;
+            yield break;
         }
-        Directory.CreateDirectory(ExportFolder);
 
         var manifests = Directory.GetFiles(manifestFolder, "*.txt");
-        int totalChunks = manifests.Length, ci = 0;
+        totalChunks = manifests.Length;
+        processedChunks = 0;
 
-        processNumber = 0;
+        Directory.CreateDirectory(ExportFolder);
         AssetDatabase.StartAssetEditing();
 
-        foreach (var mf in manifests)
+        foreach (var manifest in manifests)
         {
-            float prog = (float)(ci++) / totalChunks;
-            EditorUtility.DisplayProgressBar("Merging Chunks",
-                Path.GetFileNameWithoutExtension(mf), prog);
+            if (!isProcessing) yield break;
 
-            // read only this chunk’s lines
-            var lines = File.ReadAllLines(mf);
-            var tiles = new List<GameObject>();
+            processedChunks++;
+            yield return ProcessSingleChunk(manifest);
 
-            string safeName = SanitizeFileName(filterByAsset + "_MergedTile_" + (finishedChunkCount + 1));
-            string folderPath = Path.Combine(ExportFolder + filterByAsset + "_FBXFolderAssets/");
-            string fbxPath = GetAbsolutePath(Path.Combine(folderPath, $"{safeName}.fbx"));
-            if (File.Exists(fbxPath))
+            File.Delete(manifest);
+
+            if (processedChunks % 5 == 0)
             {
-                Debug.Log("Skipped chunk, because it already exists.");
-                finishedChunkCount++;
-                File.Delete(mf);
-                continue;
+                Resources.UnloadUnusedAssets();
+                GC.Collect();
+                yield return null;
             }
-            // instantiate & texture each entry
-            foreach (var ln in lines)
-            {
-                var parts = ln.Split('|');
-                var fbxRel = parts[0];
-                var texRel = parts[1];
-
-                var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(fbxRel);
-                if (prefab == null) continue;
-                var inst = PrefabUtility.InstantiatePrefab(prefab) as GameObject;
-
-                var r = inst.GetComponentInChildren<Renderer>();
-                var m = new Material(Shader.Find("HDRP/Lit"));
-                var tex = AssetDatabase.LoadAssetAtPath<Texture2D>(texRel);
-                if (tex != null) m.SetTexture("_BaseColorMap", tex);
-                r.sharedMaterial = m;
-
-                var mfilt = inst.GetComponentInChildren<MeshFilter>();
-                var mesh = mfilt.sharedMesh;
-
-                tiles.Add(mfilt.gameObject);
-            }
-
-            // now call your merge/export routine on just this chunk’s tiles
-            MergeAndExportChunk(tiles);
-
-            // destroy originals & delete manifest
-            foreach (var t in tiles)
-                GameObject.DestroyImmediate(t.transform.parent.gameObject);
-            File.Delete(mf);
-            Resources.UnloadUnusedAssets();
-            System.GC.Collect();
         }
 
         AssetDatabase.StopAssetEditing();
         AssetDatabase.Refresh();
-
-        EditorUtility.ClearProgressBar();
-        Debug.Log($"Processed {totalChunks} chunks; imports/exports complete.");
+        isProcessing = false;
     }
 
-    void MergeAndExportChunk(List<GameObject> tiles)
+    IEnumerator ProcessSingleChunk(string manifestPath)
     {
-        List<GameObject> mergedTiles = new List<GameObject>();
-        int total = tiles.Count;
-        int processedCount = 0;
+        var lines = File.ReadAllLines(manifestPath);
+        var tiles = new List<GameObject>();
 
-        try
+        // Load tiles
+        foreach (var line in lines)
         {
-            while (tiles.Count > 0)
+            var parts = line.Split('|');
+            var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(parts[0]);
+            if (prefab == null) continue;
+
+            var inst = PrefabUtility.InstantiatePrefab(prefab) as GameObject;
+            var r = inst.GetComponentInChildren<Renderer>();
+            var tex = AssetDatabase.LoadAssetAtPath<Texture2D>(parts[1]);
+
+            if (r != null && tex != null)
             {
-                GameObject tile = tiles[0];
-                tiles.RemoveAt(0);
-                if (tile == null) continue;
-
-                processedCount++;
-                float progress = (float)processedCount / total;
-                EditorUtility.DisplayProgressBar("Merging Tiles", $"Processing {processedCount}/{total}", progress);
-
-                // Add all hits to chunk
-                /*Collider[] hits = Physics.OverlapSphere(tile.transform.position, chunkSize);
-                List<GameObject> group = new List<GameObject> { tile.gameObject };
-                */
-                List<GameObject> group = new List<GameObject> { tile.gameObject };
-                foreach (var add in tiles)
-                {
-                    group.Add(add.gameObject);
-                }
-
-                // Prepare CombineInstance list
-                List<CombineInstance> combineInstances = new List<CombineInstance>();
-                List<Material> newMaterials = new List<Material>();
-                foreach (GameObject go in group)
-                {
-                    MeshFilter mf = go.GetComponent<MeshFilter>();
-                    MeshRenderer mr = go.GetComponent<MeshRenderer>();
-                    if (mf == null || mr == null || mf.sharedMesh == null) continue;
-                    Mesh mesh = mf.sharedMesh;
-                    Material[] mats = mr.sharedMaterials;
-                    for (int sub = 0; sub < mesh.subMeshCount; sub++)
-                    {
-                        CombineInstance ci = new CombineInstance();
-                        ci.mesh = mesh;
-                        ci.subMeshIndex = sub;
-                        ci.transform = go.transform.localToWorldMatrix;
-                        combineInstances.Add(ci);
-                        if (sub < mats.Length) newMaterials.Add(mats[sub]);
-                    }
-                }
-
-                // Combine into one mesh
-                Mesh combinedMesh = new Mesh();
-                combinedMesh.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
-                combinedMesh.CombineMeshes(combineInstances.ToArray(), false, true);
-
-                // Create new GameObject for the combined mesh
-                finishedChunkCount++;
-                GameObject merged = new GameObject(filterByAsset + "_MergedTile_" + finishedChunkCount);
-                MeshFilter newMf = merged.AddComponent<MeshFilter>();
-                newMf.sharedMesh = combinedMesh;
-                MeshRenderer newMr = merged.AddComponent<MeshRenderer>();
-                newMr.sharedMaterials = newMaterials.ToArray();
-                merged.SetActive(false);
-                mergedTiles.Add(merged);
-
-                // Destroy original tiles
-                foreach (GameObject go in group)
-                {
-                    tiles.Remove(go);
-                    if (go != null)
-                    {
-                        UnityEngine.Object.DestroyImmediate(go.transform.parent.gameObject);
-                    }
-                }
-            }
-        }
-        catch (System.Exception e)
-        {
-            Debug.LogException(e);
-        }
-        finally
-        {
-            EditorUtility.ClearProgressBar();
-            processedCount = 0;
-            total = mergedTiles.Count;
-            if (mergedTiles != null && mergedTiles.Count > 0)
-            {
-                EnsureExportDirectory();
-                foreach (GameObject go in mergedTiles)
-                {
-                    EditorUtility.DisplayProgressBar("Exporting Merged FBX Files", $"Processing {go}", (float)processedCount / total);
-                    ExportGameObjectToFbx(go);
-                    processedCount++;
-                    processNumber++;
-                }
-                Debug.Log($"Merged tiles into {mergedTiles.Count} combined objects.");
-            }
-            mergedTiles = null;
-            System.GC.Collect();
-
-        }
-        EditorUtility.ClearProgressBar();
-        Debug.Log("Finished Process");
-    }
-    private void ExportGameObjectToFbx(GameObject go)
-    {
-        string safeName = SanitizeFileName(go.name);
-        string folderPath = Path.Combine(ExportFolder + filterByAsset + "_FBXFolderAssets/");
-        string fbxPath = Path.Combine(folderPath, $"{safeName}.fbx");
-        string materialsFolder = Path.Combine(folderPath, "Materials/");
-        string texturesFolder = Path.Combine(folderPath, "Textures/");
-
-
-        Directory.CreateDirectory(materialsFolder);
-        Directory.CreateDirectory(texturesFolder);
-        if (File.Exists(fbxPath))
-        {
-            Object.DestroyImmediate(go);
-            return;
-        }
-
-        GameObject temp = go;
-        temp.name = safeName;
-        Renderer renderer = temp.GetComponent<Renderer>();
-        if (renderer != null)
-        {
-            Material[] originalMaterials = renderer.sharedMaterials;
-            Material[] exportedMaterials = new Material[originalMaterials.Length];
-
-            for (int i = 0; i < originalMaterials.Length; i++)
-            {
-                Material original = originalMaterials[i];
-                if (original == null) continue;
-
-                // Clone material
-                Material exportMat = new Material(Shader.Find("HDRP/Lit"));
-                exportMat.name = $"_{safeName}_Material_{i}";
-
-                // Copy main texture
-                Texture2D tex = original.mainTexture as Texture2D;
-                tex.name = $"_{safeName}_Texture_{i}";
-                if (tex != null)
-                {
-                    exportMat.mainTexture = tex;
-
-                    // Get texture path
-                    string texturePath = AssetDatabase.GetAssetPath(tex);
-                    string texExt = Path.GetExtension(texturePath);
-                    string newTexPath = Path.Combine(texturesFolder, tex.name + texExt);
-
-                    // Copy texture to export folder
-                    File.Copy(texturePath, newTexPath, true);
-                }
-
-                // Save material asset
-                string matPath = Path.Combine(materialsFolder, exportMat.name + ".mat");
-                string relativeMatPath = matPath.Substring(matPath.IndexOf("Assets"));
-                AssetDatabase.CreateAsset(exportMat, relativeMatPath);
-
-                exportedMaterials[i] = exportMat;
+                var tempMat = new Material(r.sharedMaterial);
+                tempMat.mainTexture = tex;
+                r.sharedMaterial = tempMat;
             }
 
-            renderer.sharedMaterials = exportedMaterials;
+            tiles.Add(inst);
+            if (tiles.Count % 5 == 0) yield return null;
         }
 
-        exportModelOptions.ExportFormat = ExportFormat.Binary;
-        exportModelOptions.KeepInstances = true;
-        exportModelOptions.ExportUnrendered = false;
-        exportModelOptions.EmbedTextures = false; // Now exporting textures separately
-        ModelExporter.ExportObject(fbxPath, temp, exportModelOptions);
+        // Merge and export
+        yield return MergeAndExportChunk(tiles);
 
-        // Export textures from each material (single renderer, multiple materials)
-        //ExportMaterialsTextures(temp.GetComponent<Renderer>(), folderPath, safeName);
-
-        Object.DestroyImmediate(temp);
-
+        // Cleanup
+        foreach (var tile in tiles)
+            DestroyImmediate(tile);
     }
-    private void EnsureExportDirectory()
+
+    IEnumerator MergeAndExportChunk(List<GameObject> tiles)
     {
-        if (!Directory.Exists(ExportFolder))
+        var combineInstances = new List<CombineInstance>();
+        var materials = new List<Material>();
+
+        foreach (var tile in tiles)
         {
-            Directory.CreateDirectory(ExportFolder);
+            var mf = tile.GetComponentInChildren<MeshFilter>();
+            var mr = tile.GetComponentInChildren<MeshRenderer>();
+
+            if (mf == null || mr == null) continue;
+
+            for (int i = 0; i < mf.sharedMesh.subMeshCount; i++)
+            {
+                combineInstances.Add(new CombineInstance
+                {
+                    mesh = mf.sharedMesh,
+                    subMeshIndex = i,
+                    transform = mf.transform.localToWorldMatrix
+                });
+            }
+
+            materials.AddRange(mr.sharedMaterials);
         }
-        if (!Directory.Exists(ExportFolder + filterByAsset + "_FBXFolderAssets/"))
-        {
-            Directory.CreateDirectory(ExportFolder + filterByAsset + "_FBXFolderAssets/");
-        }
+
+        var combinedMesh = new Mesh();
+        combinedMesh.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
+        combinedMesh.CombineMeshes(combineInstances.ToArray(), false);
+
+        var mergedGO = new GameObject($"Merged_{finishedChunkCount++}");
+        mergedGO.AddComponent<MeshFilter>().sharedMesh = combinedMesh;
+        mergedGO.AddComponent<MeshRenderer>().sharedMaterials = materials.ToArray();
+
+        ExportMergedObject(mergedGO);
+        DestroyImmediate(mergedGO);
+        DestroyImmediate(combinedMesh);
+
+        yield return null;
     }
 
-    private string SanitizeFileName(string name)
+    void ExportMergedObject(GameObject go)
     {
-        foreach (char c in Path.GetInvalidFileNameChars())
+        var safeName = SanitizeFileName($"{filterByAsset}_Chunk_{processedChunks}");
+        var exportPath = Path.Combine(ExportFolder, $"{safeName}.fbx");
+
+        exportModelOptions = new ExportModelOptions
         {
-            name = name.Replace(c, '_');
-        }
-        return name;
+            EmbedTextures = true,
+            ExportFormat = ExportFormat.Binary
+        };
+
+        ModelExporter.ExportObject(exportPath, go, exportModelOptions);
     }
-    string ToUnityPath(string abs)
+
+    string SanitizeFileName(string name) =>
+        Path.GetInvalidFileNameChars().Aggregate(name, (current, c) => current.Replace(c, '_'));
+
+    string ToUnityPath(string absPath) =>
+        "Assets" + absPath.Replace("\\", "/").Replace(Application.dataPath, "");
+
+    void Update()
     {
-        string projectPath = UnityEngine.Application.dataPath.Replace("\\", "/");
-        abs = abs.Replace("\\", "/");
-
-        if (abs.StartsWith(projectPath))
-        {
-            // Add "Assets" back since Application.dataPath ends in "/Assets"
-            return "Assets" + abs.Substring(projectPath.Length);
-        }
-
-        return null;
+        if (isProcessing)
+            Repaint();
     }
-    public static string GetAbsolutePath(string relativePath)
-    {
-        // Ensure consistent separators
-        relativePath = relativePath.Replace("\\", "/");
 
-        if (relativePath.StartsWith("Assets"))
-        {
-            string basePath = Application.dataPath; // e.g., C:/MyProject/Assets
-            string subPath = relativePath.Substring("Assets/".Length);
-            //subPath = subPath.TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-            string fullPath = Path.Combine(basePath, subPath).Replace("/", Path.DirectorySeparatorChar.ToString());
-            return fullPath;
-        }
-        else
-        {
-            // If it's not under Assets, treat it as already absolute or invalid
-            Debug.LogWarning($"Path doesn't start with 'Assets': {relativePath}");
-            return Path.GetFullPath(relativePath);
-        }
-    }
+    void OnDestroy() => CancelProcessing();
 }
