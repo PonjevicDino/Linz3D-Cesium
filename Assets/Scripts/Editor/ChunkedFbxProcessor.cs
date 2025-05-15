@@ -161,6 +161,7 @@ public class ChunkedFbxProcessor : EditorWindow
             foreach (var t in tiles)
                 GameObject.DestroyImmediate(t.transform.parent.gameObject);
             File.Delete(mf);
+            Resources.UnloadUnusedAssets();
             System.GC.Collect();
         }
 
@@ -244,6 +245,9 @@ public class ChunkedFbxProcessor : EditorWindow
                         UnityEngine.Object.DestroyImmediate(go.transform.parent.gameObject);
                     }
                 }
+
+                Object.DestroyImmediate(merged);
+                Object.DestroyImmediate(combinedMesh);
             }
         }
         catch (System.Exception e)
