@@ -245,9 +245,6 @@ public class ChunkedFbxProcessor : EditorWindow
                         UnityEngine.Object.DestroyImmediate(go.transform.parent.gameObject);
                     }
                 }
-
-                Object.DestroyImmediate(merged);
-                Object.DestroyImmediate(combinedMesh);
             }
         }
         catch (System.Exception e)
@@ -271,6 +268,8 @@ public class ChunkedFbxProcessor : EditorWindow
                 }
                 Debug.Log($"Merged tiles into {mergedTiles.Count} combined objects.");
             }
+            mergedTiles = null;
+            System.GC.Collect();
 
         }
         EditorUtility.ClearProgressBar();
